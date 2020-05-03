@@ -20,6 +20,9 @@ namespace HigherTaxes
     {
         public static KCModHelper helper;
 
+        private const string modName = "cmjten10-kc-higher-taxes-mod";
+        private static Dictionary<int, float> taxRates = new Dictionary<int, float>();
+
         void Preload(KCModHelper __helper) 
         {
             helper = __helper;
@@ -27,6 +30,73 @@ namespace HigherTaxes
             harmony.PatchAll(Assembly.GetExecutingAssembly());
         }
 
+        void SceneLoaded(KCModHelper __helper)
+        {
+            Broadcast.OnLoadedEvent.Listen(OnLoaded);
+            Broadcast.OnSaveEvent.Listen(OnSave);
+        }
+
+        // Loads higher tax rates.
+        public void OnLoaded(object sender, OnLoadedEvent loadedEvent)
+        {
+            int landmassesCount = Player.inst.PlayerLandmassOwner.ownedLandMasses.Count;
+            for (int i = 0; i < landmassesCount; i++)
+            {
+                int landmassId = Player.inst.PlayerLandmassOwner.ownedLandMasses.data[i];
+                float currentTaxRate = Player.inst.GetTaxRate(landmassId);
+                string higherTaxRateString = LoadSave.ReadDataGeneric(modName, $"{landmassId}");
+
+                // If the current tax rate is less than 30%, don't set the higher tax rate. This covers the case where
+                // the player set a higher tax rate, deleted the mod, then set a <30% tax rate, then installed the mod
+                // again. Most likely the player would want to stay at the <30% tax rate.
+                if (!string.IsNullOrEmpty(higherTaxRateString) && currentTaxRate >= 3f)
+                {
+                    float higherTaxRate = float.Parse(higherTaxRateString);
+                    Player.inst.SetTaxRate(landmassId, higherTaxRate);
+                }
+            }
+        }
+
+        // Saves higher tax rates to mod-specific data. Anything above 30% will be reset to 30% temporarily to be saved 
+        // with PlayerSaveData. In the case where the mod is deleted, higher tax rates would not persist.
+        public void OnSave(object sender, OnSaveEvent saveEvent)
+        {
+            taxRates.Clear();
+            int landmassesCount = Player.inst.PlayerLandmassOwner.ownedLandMasses.Count;
+            for (int i = 0; i < landmassesCount; i++)
+            {
+                int landmassId = Player.inst.PlayerLandmassOwner.ownedLandMasses.data[i];
+                float taxRate = Player.inst.GetTaxRate(landmassId);
+                LoadSave.SaveDataGeneric(modName, $"{landmassId}", taxRate.ToString());
+                if (taxRate > 3f)
+                {
+                    // Temporarily set tax to 30% until PlayerSaveData::Pack is run to save a valid max tax rate, then
+                    // restore to the higher tax rate in PlayerSaveData::Pack Postfix patch.
+                    taxRates[landmassId] = taxRate;
+                    Player.inst.SetTaxRate(landmassId, 3f);
+                }
+            }
+        }
+
+        // This restores higher tax rates after saving them as 30% in PlayerSaveData. In the case where the mod is 
+        // deleted, the next load would reset the higher tax rates to 30%.
+        [HarmonyPatch(typeof(Player.PlayerSaveData))]
+        [HarmonyPatch("Pack")]
+        public static class RestoreHigherTaxRatesAfterPackPatch
+        {
+            static void Postfix()
+            {
+                foreach (KeyValuePair<int, float> entry in taxRates)
+                {
+                    int landmassId = entry.Key;
+                    float taxRate = entry.Value;
+                    Player.inst.SetTaxRate(landmassId, taxRate);
+                }
+                taxRates.Clear();
+            }
+        }
+
+        // Removes the upper limit of 30% tax rate. Completely replaces IncreaseTaxRate.
         [HarmonyPatch(typeof(Player))]
         [HarmonyPatch("IncreaseTaxRate")]
         public static class TaxNoUpperLimitPatch
@@ -40,6 +110,7 @@ namespace HigherTaxes
             }
         }
 
+        // Beyond 30%, happiness decreases by 10 for every 5% increase in tax. Completely replaces GetHappinessFromTax.
         [HarmonyPatch(typeof(Home))]
         [HarmonyPatch("GetHappinessFromTax")]
         public static class NewHappinessCalculationPatch
