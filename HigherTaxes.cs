@@ -2,9 +2,9 @@
 Why limit yourself to 30%? Tax your peasants as high as you want, the sky is the limit.
 
 Author: cmjten10 (https://steamcommunity.com/id/cmjten10/)
-Mod Version: 1
-Target K&C Version: 117r5s-mods
-Date: 2020-05-03
+Mod Version: 1.0.1
+Target K&C Version: 117r6s-mods
+Date: 2020-05-06
 */
 using Harmony;
 using System;
@@ -16,17 +16,21 @@ using UnityEngine;
 
 namespace HigherTaxes
 {
-    public class HigherTaxesMod : MonoBehaviour 
+    public class ModMain : MonoBehaviour 
     {
-        public static KCModHelper helper;
+        private const string authorName = "cmjten10";
+        private const string modName = "Higher Taxes";
+        private const string modNameNoSpace = "HigherTaxes";
+        private const string modSaveId = "cmjten10-kc-higher-taxes-mod";
+        private const string version = "v1.0.1";
 
-        private const string modName = "cmjten10-kc-higher-taxes-mod";
+        public static KCModHelper helper;
         private static Dictionary<int, float> taxRates = new Dictionary<int, float>();
 
         void Preload(KCModHelper __helper) 
         {
             helper = __helper;
-            var harmony = HarmonyInstance.Create("harmony");
+            var harmony = HarmonyInstance.Create($"{authorName}.{modNameNoSpace}");
             harmony.PatchAll(Assembly.GetExecutingAssembly());
         }
 
@@ -44,7 +48,7 @@ namespace HigherTaxes
             {
                 int landmassId = Player.inst.PlayerLandmassOwner.ownedLandMasses.data[i];
                 float currentTaxRate = Player.inst.GetTaxRate(landmassId);
-                string higherTaxRateString = LoadSave.ReadDataGeneric(modName, $"{landmassId}");
+                string higherTaxRateString = LoadSave.ReadDataGeneric(modSaveId, $"{landmassId}");
 
                 // If the current tax rate is less than 30%, don't set the higher tax rate. This covers the case where
                 // the player set a higher tax rate, deleted the mod, then set a <30% tax rate, then installed the mod
@@ -67,7 +71,7 @@ namespace HigherTaxes
             {
                 int landmassId = Player.inst.PlayerLandmassOwner.ownedLandMasses.data[i];
                 float taxRate = Player.inst.GetTaxRate(landmassId);
-                LoadSave.SaveDataGeneric(modName, $"{landmassId}", taxRate.ToString());
+                LoadSave.SaveDataGeneric(modSaveId, $"{landmassId}", taxRate.ToString());
                 if (taxRate > 3f)
                 {
                     // Temporarily set tax to 30% until PlayerSaveData::Pack is run to save a valid max tax rate, then
@@ -115,38 +119,13 @@ namespace HigherTaxes
         [HarmonyPatch("GetHappinessFromTax")]
         public static class NewHappinessCalculationPatch
         {
-            static bool Prefix(Home __instance, Building ___b, ref int __result)
+            static void Postfix(Home __instance, Building ___b, ref int __result)
             {
                 float taxRate = Player.inst.GetTaxRate(___b.LandMass());
-                float absoluteTaxRate = Math.Abs(taxRate);
-                int happinessModifier = 0;
-
-                if (absoluteTaxRate >= 0.5f && absoluteTaxRate < 1f)
+                if (taxRate >= 3f)
                 {
-                    happinessModifier = -3;
+                    __result = -(40 + (int)((taxRate - 3f) / 0.5f) * 10);
                 }
-                if (absoluteTaxRate >= 1f && absoluteTaxRate < 1.5f)
-                {
-                    happinessModifier = -7;
-                }
-                if (absoluteTaxRate >= 1.5f && absoluteTaxRate < 2f)
-                {
-                    happinessModifier = -12;
-                }
-                if (absoluteTaxRate == 2f && absoluteTaxRate < 2.5f)
-                {
-                    happinessModifier = -18;
-                }
-                if (absoluteTaxRate >= 2.5f && absoluteTaxRate < 3f)
-                {
-                    happinessModifier = -30;
-                }
-                if (absoluteTaxRate >= 3f)
-                {
-                    happinessModifier = -(40 + (int)((absoluteTaxRate - 3f) / 0.5f) * 10);
-                }
-                __result = happinessModifier;
-                return false;
             }
         }
     }
